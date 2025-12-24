@@ -7,6 +7,14 @@
 2. 训练my_model的数据必须是start_date之前的数据
 3. 重新设计模型需要把本地支持断点续跑的simulation_file删除
 4. investment_horizon可以选W或者M，要求在聚宽环境中能运行
+
+注意：
+本代码需要在聚宽（JoinQuant）环境中运行，该环境提供以下全局函数：
+- get_all_securities(): 获取所有证券信息
+- get_extras(): 获取额外数据（如ST标记）
+- get_price(): 获取价格数据
+- get_index_stocks(): 获取指数成分股
+如果在本地环境运行，需要安装jqdata并进行相应的导入。
 """
 
 import pandas as pd
