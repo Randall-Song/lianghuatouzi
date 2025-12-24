@@ -5,7 +5,7 @@ import datetime
 from jqfactor import get_all_factors, get_factor_values
 import jqdata
 import warnings
-warnings.simplefilter(action=&#39;ignore&#39;, category=FutureWarning)
+warnings.simplefilter(action='ignore', category=FutureWarning)
 from jqlib import alpha101
 import pickle
 import os
@@ -13,36 +13,36 @@ from jqfactor import get_all_factors
 
 start_date = datetime.date(2020, 1, 1)
 end_date = datetime.date(2025,12, 15)
-investment_horizon = &#39;M&#39; # M 为月度调参， W为周度调仓, d为日度调仓
+investment_horizon = 'M' # M 为月度调参， W为周度调仓, d为日度调仓
 number_of_periods_per_year = 12 # 一年12个交易月，52个交易周，252个交易日
-simulation_file = &quot;L10_temp_fixed_m_basicsrisk.pkl&quot;
+simulation_file = "L10_temp_fixed_m_basicsrisk.pkl"
 
 all_factors = get_all_factors()
-all_factors = all_factors.loc[[a in [&#39;risk&#39;, &#39;basics&#39;] \
-                 for a in all_factors.loc[:, &#39;category&#39;]], &#39;factor&#39;].tolist()
+all_factors = all_factors.loc[[a in ['risk', 'basics'] \
+                 for a in all_factors.loc[:, 'category']], 'factor'].tolist()
 len(all_factors)
 
 def get_st_or_paused_stock_set(decision_date):
     # 抓取st和停牌股票的集合
-    all_stock_ids = get_all_securities(types=[&#39;stock&#39;], date=decision_date).index.tolist()
-    is_st_flag = get_extras(&#39;is_st&#39;, all_stock_ids, start_date=decision_date, end_date=decision_date)
+    all_stock_ids = get_all_securities(types=['stock'], date=decision_date).index.tolist()
+    is_st_flag = get_extras('is_st', all_stock_ids, start_date=decision_date, end_date=decision_date)
     st_set = set(is_st_flag.iloc[0][is_st_flag.iloc[0]].index)
     
     paused_flag = get_price(all_stock_ids, 
                         start_date = decision_date, 
                         end_date = decision_date, 
-                        frequency=&#39;daily&#39;,
-                        fq=&#39;post&#39;, panel=False, fields=[&#39;paused&#39;])
-    paused_set = set(paused_flag.loc[paused_flag.loc[:, &#39;paused&#39;]==1].loc[:, &#39;code&#39;].values)
+                        frequency='daily',
+                        fq='post', panel=False, fields=['paused'])
+    paused_set = set(paused_flag.loc[paused_flag.loc[:, 'paused']==1].loc[:, 'code'].values)
     return st_set.union(paused_set)
 
 def cal_vwap_ret_series(order_book_ids, buy_date, sell_date):
     # 计算一组资产买卖周期内的vwap回报率。
-    if len(order_book_ids)==0: return pd.Series(dtype=&#39;float64&#39;)
-    all_data = get_price(order_book_ids, buy_date, sell_date, fields=[&#39;money&#39;, &#39;volume&#39;], 
-                            fq=&#39;post&#39;, panel=False)
-    vwap_prices = all_data.set_index([&#39;time&#39;, &#39;code&#39;]).unstack().loc[:, &#39;money&#39;] / \
-        all_data.set_index([&#39;time&#39;, &#39;code&#39;]).unstack().loc[:, &#39;volume&#39;]
+    if len(order_book_ids)==0: return pd.Series(dtype='float64')
+    all_data = get_price(order_book_ids, buy_date, sell_date, fields=['money', 'volume'], 
+                            fq='post', panel=False)
+    vwap_prices = all_data.set_index(['time', 'code']).unstack().loc[:, 'money'] / \
+        all_data.set_index(['time', 'code']).unstack().loc[:, 'volume']
     vwap_ret_series = vwap_prices.iloc[-1]/vwap_prices.iloc[0]-1
     return vwap_ret_series
 
@@ -128,10 +128,10 @@ training_dates = get_buy_dates(start_date = start_date - datetime.timedelta(365*
 buy_date = training_dates[0]
 sell_date = training_dates[1]
 i_pre_date = get_previous_trade_date(buy_date)
-all_stocks = get_index_stocks(&#39;000852.XSHG&#39;, date=i_pre_date)
+all_stocks = get_index_stocks('000852.XSHG', date=i_pre_date)
 all_stocks = list(set(all_stocks) - get_st_or_paused_stock_set(i_pre_date))
 factor_df = get_my_factors(i_pre_date, all_stocks)
-factor_df.loc[:, &#39;next_vwap_ret&#39;] = cal_vwap_ret_series(all_stocks, buy_date, sell_date)
+factor_df.loc[:, 'next_vwap_ret'] = cal_vwap_ret_series(all_stocks, buy_date, sell_date)
 factor_df = factor_df.apply(normalize_series)
 factor_df.head()
 
@@ -140,12 +140,12 @@ for i in tqdm(range(len(training_dates)-1)):
     buy_date = training_dates[i]
     sell_date = training_dates[i+1]
     i_pre_date = get_previous_trade_date(buy_date)
-    all_stocks = get_index_stocks(&#39;000852.XSHG&#39;, date=i_pre_date)
+    all_stocks = get_index_stocks('000852.XSHG', date=i_pre_date)
     all_stocks = list(set(all_stocks) - get_st_or_paused_stock_set(i_pre_date))
     
     factor_df = get_my_factors(i_pre_date, all_stocks)
     
-    factor_df.loc[:, &#39;next_vwap_ret&#39;] = cal_vwap_ret_series(all_stocks, buy_date, sell_date)
+    factor_df.loc[:, 'next_vwap_ret'] = cal_vwap_ret_series(all_stocks, buy_date, sell_date)
     factor_df = factor_df.apply(normalize_series)
     factor_df_list.append(factor_df)
 
@@ -159,9 +159,9 @@ my_model = Ridge()
 my_model.fit(factor_df_list.iloc[:, :-1], factor_df_list.iloc[:, -1])
 coefficients = my_model.coef_
 
-print(&quot;回归权重（系数）:&quot;)
+print("回归权重（系数）:")
 for i, coef in enumerate(coefficients):
-    print(f&quot;X{i}的系数: {coef}&quot;)
+    print(f"X{i}的系数: {coef}")
 
 pd.Series(my_model.predict(factor_df_list.iloc[:, :-1]), index = factor_df_list.index).head()
 
@@ -171,7 +171,7 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     #（decision_date当天收盘的信息依然可用，假设在decision_date的下一天才调仓）
     
     # 基础股票池，去掉st和停牌股
-    all_stocks = get_index_stocks(&#39;000852.XSHG&#39;, date=decision_date)
+    all_stocks = get_index_stocks('000852.XSHG', date=decision_date)
     all_stocks = list(set(all_stocks) - get_st_or_paused_stock_set(decision_date))
     
     # 抓取因子
@@ -196,13 +196,13 @@ def simulate_wealth_process(start_date, end_date):
     wealth_process = pd.Series(np.nan, index=all_buy_dates)
     wealth_process.iloc[0] = 1
     allocation_dict = dict()
-    old_portfolio_weight_series = pd.Series(dtype=&#39;float64&#39;)
+    old_portfolio_weight_series = pd.Series(dtype='float64')
     
     # 断点续跑机制
     start_index = 0
     if os.path.exists(simulation_file):
         start_index, allocation_dict, wealth_process, old_portfolio_weight_series = \
-            pickle.load(open(simulation_file, &#39;rb&#39;))
+            pickle.load(open(simulation_file, 'rb'))
             
     for i in tqdm(range(start_index, len(all_buy_dates)-1)): # 这里循环只到倒数第二个买卖日
         buy_date = all_buy_dates[i]
@@ -220,7 +220,7 @@ def simulate_wealth_process(start_date, end_date):
         
         # 保存数据进行断点续跑
         pickle.dump([i+1, allocation_dict, wealth_process, old_portfolio_weight_series], \
-                    open(simulation_file, &quot;wb&quot;), protocol=4)
+                    open(simulation_file, "wb"), protocol=4)
         
     return wealth_process, allocation_dict
 
@@ -231,35 +231,35 @@ wealth_process, allocation_dict = simulate_wealth_process(start_date, end_date)
 pd.Series([len(b) for a,b in allocation_dict.items()]).plot(figsize=(10, 3))
 
 # 画策略的财富曲线
-wealth_process.name = &#39;我的策略&#39;
+wealth_process.name = '我的策略'
 wealth_process.plot(figsize=(10, 3))
 
-get_security_info(&#39;512100.XSHG&#39;).display_name
+get_security_info('512100.XSHG').display_name
 
 # 获取基准ETF的日度vwap价格，注意不能直接用指数 000852.XSHG !!
-benchmark_index = get_price([&#39;512100.XSHG&#39;], 
+benchmark_index = get_price(['512100.XSHG'], 
             start_date = start_date, 
             end_date = end_date, 
-            frequency=&#39;daily&#39;,
-            fq=&#39;post&#39;, panel=False, fields=[&#39;money&#39;, &#39;volume&#39;])
-benchmark_index.loc[:, &#39;vwap&#39;] = benchmark_index.loc[:, &#39;money&#39;] / benchmark_index.loc[:, &#39;volume&#39;]
+            frequency='daily',
+            fq='post', panel=False, fields=['money', 'volume'])
+benchmark_index.loc[:, 'vwap'] = benchmark_index.loc[:, 'money'] / benchmark_index.loc[:, 'volume']
 benchmark_index.head()
 
-benchmark_index = benchmark_index.set_index(&#39;time&#39;).loc[:, [&#39;vwap&#39;]].loc[wealth_process.index]
+benchmark_index = benchmark_index.set_index('time').loc[:, ['vwap']].loc[wealth_process.index]
 benchmark_index.head()
 
 benchmark_index = benchmark_index/benchmark_index.iloc[0]
-benchmark_index.columns = [&#39;基准ETF&#39;]
+benchmark_index.columns = ['基准ETF']
 benchmark_index.head()
 
 combined_df = pd.concat([wealth_process, benchmark_index], axis=1)
 combined_df.plot(figsize=(10, 3))
 
 combined_df_ret = combined_df.pct_change()
-combined_df_ret.loc[:, &#39;超额收益&#39;] = combined_df_ret.loc[:, &#39;我的策略&#39;] - combined_df_ret.loc[:, &#39;基准ETF&#39;]
+combined_df_ret.loc[:, '超额收益'] = combined_df_ret.loc[:, '我的策略'] - combined_df_ret.loc[:, '基准ETF']
 performance_metrics = combined_df_ret.mean() * number_of_periods_per_year / \
     (combined_df_ret.std()*sqrt(number_of_periods_per_year))
-performance_metrics.index = [&#39;我的策略夏普&#39;, &#39;基准ETF夏普&#39;, &#39;信息比率&#39;]
+performance_metrics.index = ['我的策略夏普', '基准ETF夏普', '信息比率']
 performance_metrics
 
 fig = plt.figure(figsize=(3, 3))
