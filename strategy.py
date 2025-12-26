@@ -9,9 +9,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from jqlib import alpha101
 import pickle
 import os
-from sklearn.linear_model import Ridge
 from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.preprocessing import StandardScaler
 from math import sqrt
 
 # ============================================================================
