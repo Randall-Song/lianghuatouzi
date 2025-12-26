@@ -1,3 +1,18 @@
+"""
+多因子量化投资策略 - Multi-Factor Quantitative Investment Strategy
+
+本策略使用Gradient Boosting模型预测股票收益，基于49个风险和基本面因子。
+目标是最大化投资组合的信息比率（Information Ratio）。
+
+主要特点：
+1. 使用GradientBoostingRegressor捕捉非线性关系和因子交互
+2. 训练数据使用start_date之前的历史数据
+3. 支持月度(M)和周度(W)调仓
+4. 包含模型持久化和回测断点续跑机制
+
+适用环境：聚宽(JoinQuant)量化平台
+"""
+
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -21,6 +36,22 @@ investment_horizon = 'M'  # M 为月度调参， W为周度调仓, d为日度调
 number_of_periods_per_year = 12  # 一年12个交易月，52个交易周，252个交易日
 simulation_file = "L10_temp_fixed_m_basicsrisk.pkl"
 model_file = "my_model.pkl"
+
+# Model configuration
+TRAINING_YEARS = 4  # 训练数据的历史年数
+N_STOCKS = 40  # 投资组合中的股票数量
+
+# GradientBoosting hyperparameters
+GB_N_ESTIMATORS = 150
+GB_LEARNING_RATE = 0.03
+GB_MAX_DEPTH = 5
+GB_MIN_SAMPLES_SPLIT = 30
+GB_MIN_SAMPLES_LEAF = 15
+GB_SUBSAMPLE = 0.7
+GB_MAX_FEATURES = 'sqrt'
+GB_LOSS = 'huber'
+GB_ALPHA = 0.9
+GB_RANDOM_STATE = 42
 
 # ============================================================================
 # Get all risk and basics factors
@@ -141,8 +172,8 @@ def train_my_model():
     """
     print("开始训练模型...")
     
-    # 训练数据使用的时间节点 - 使用start_date之前的数据（增加到4年以获得更多训练样本）
-    training_dates = get_buy_dates(start_date = start_date - datetime.timedelta(365*4), 
+    # 训练数据使用的时间节点 - 使用start_date之前的数据
+    training_dates = get_buy_dates(start_date = start_date - datetime.timedelta(days=365*TRAINING_YEARS), 
                                    end_date = start_date, freq=investment_horizon)
     
     print(f"训练期数: {len(training_dates)-1}")
@@ -168,16 +199,16 @@ def train_my_model():
     # 使用改进的模型 - Gradient Boosting with optimized hyperparameters
     # This model can capture non-linear relationships and interactions better than Ridge
     my_model = GradientBoostingRegressor(
-        n_estimators=150,          # Increased for better learning
-        learning_rate=0.03,        # Lower learning rate for better generalization
-        max_depth=5,               # Slightly deeper trees to capture more complex patterns
-        min_samples_split=30,      # Increased to prevent overfitting
-        min_samples_leaf=15,       # Increased to prevent overfitting
-        subsample=0.7,             # Lower subsample ratio for better generalization
-        max_features='sqrt',       # Use sqrt of features to reduce overfitting
-        random_state=42,
-        loss='huber',              # More robust to outliers than squared loss
-        alpha=0.9                  # Huber loss parameter
+        n_estimators=GB_N_ESTIMATORS,
+        learning_rate=GB_LEARNING_RATE,
+        max_depth=GB_MAX_DEPTH,
+        min_samples_split=GB_MIN_SAMPLES_SPLIT,
+        min_samples_leaf=GB_MIN_SAMPLES_LEAF,
+        subsample=GB_SUBSAMPLE,
+        max_features=GB_MAX_FEATURES,
+        random_state=GB_RANDOM_STATE,
+        loss=GB_LOSS,
+        alpha=GB_ALPHA
     )
     
     X_train = factor_df_list.iloc[:, :-1]
@@ -239,9 +270,7 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     predicted_factor = pd.Series(my_model.predict(factor_df), index = factor_df.index)
     
     # 筛选 - 选择预测收益最高的股票
-    # 使用更严格的筛选标准，选择top 40只股票以提高收益质量
-    n_stocks = 40
-    filtered_assets = predicted_factor.nlargest(n_stocks).index.tolist()
+    filtered_assets = predicted_factor.nlargest(N_STOCKS).index.tolist()
     
     # 配权 - 使用预测值加权而不是等权，给予更高预测收益的股票更高权重
     predicted_weights = predicted_factor.loc[filtered_assets]
