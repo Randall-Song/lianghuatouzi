@@ -100,32 +100,7 @@ print(f"确保训练数据在测试开始之前: {training_dates[-1] < start_dat
 
 ---
 
-### 4. 模拟文件管理
-
-**原始版本：**
-```python
-# 需要手动删除simulation_file
-simulation_file = "L10_temp_fixed_m_basicsrisk.pkl"
-```
-
-**改进版本：**
-```python
-simulation_file = "L10_temp_fixed_m_basicsrisk.pkl"
-
-# 自动删除旧的模拟文件
-if os.path.exists(simulation_file):
-    print(f"删除旧的模拟文件: {simulation_file}")
-    os.remove(simulation_file)
-```
-
-**改进效果：**
-- ✅ 自动化重新训练流程
-- ✅ 避免使用旧数据
-- ✅ 符合问题要求
-
----
-
-### 5. 代码组织和文档
+### 4. 代码组织和文档
 
 **原始版本：**
 - HTML格式，不易编辑

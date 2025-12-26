@@ -2,11 +2,10 @@
 # 目标：设计信息比率尽量高的策略
 #
 # 重要说明：
-# 1. 重新设计模型时，需要删除本地的simulation_file以支持断点续跑
-# 2. 训练my_model的数据必须是start_date之前的数据
-# 3. cal_portfolio_weight_series(decision_date)函数签名不能改动
-# 4. 要求在聚宽环境中运行，不改变原本的输出格式
-# 5. 信息比率应为正且尽可能大
+# 1. 训练my_model的数据必须是start_date之前的数据
+# 2. cal_portfolio_weight_series(decision_date)函数签名不能改动
+# 3. 要求在聚宽环境中运行，不改变原本的输出格式
+# 4. 信息比率应为正且尽可能大
 
 import pandas as pd
 import numpy as np
@@ -17,7 +16,6 @@ import jqdata
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from jqlib import alpha101
-import pickle
 import os
 from math import sqrt
 import matplotlib.pyplot as plt
@@ -27,14 +25,7 @@ start_date = datetime.date(2020, 1, 1)
 end_date = datetime.date(2025, 12, 15)
 investment_horizon = 'M'  # M 为月度调仓， W为周度调仓, d为日度调仓
 number_of_periods_per_year = 12  # 一年12个交易月，52个交易周，252个交易日
-simulation_file = "L10_temp_fixed_m_basicsrisk.pkl"
 optimal_stock_count = 50  # 选择的股票数量
-
-# 删除旧的simulation文件以重新开始（如果需要）
-# 如果想断点续跑，注释掉下面这行
-if os.path.exists(simulation_file):
-    print(f"删除旧的模拟文件: {simulation_file}")
-    os.remove(simulation_file)
 
 # ========== 因子获取 ==========
 all_factors = get_all_factors()
@@ -276,13 +267,7 @@ def simulate_wealth_process(start_date, end_date):
     allocation_dict = dict()
     old_portfolio_weight_series = pd.Series(dtype='float64')
     
-    # 断点续跑机制
-    start_index = 0
-    if os.path.exists(simulation_file):
-        start_index, allocation_dict, wealth_process, old_portfolio_weight_series = \
-            pickle.load(open(simulation_file, 'rb'))
-            
-    for i in tqdm(range(start_index, len(all_buy_dates)-1)):
+    for i in tqdm(range(len(all_buy_dates)-1)):
         buy_date = all_buy_dates[i]
         sell_date = all_buy_dates[i+1]
         
@@ -295,10 +280,6 @@ def simulate_wealth_process(start_date, end_date):
             (1 + cal_portfolio_vwap_ret(old_portfolio_weight_series, new_portfolio_weight_series, buy_date, sell_date))
         
         old_portfolio_weight_series = new_portfolio_weight_series
-        
-        # 保存数据进行断点续跑
-        pickle.dump([i+1, allocation_dict, wealth_process, old_portfolio_weight_series], 
-                    open(simulation_file, "wb"), protocol=4)
         
     return wealth_process, allocation_dict
 

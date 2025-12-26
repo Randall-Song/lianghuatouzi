@@ -51,15 +51,8 @@ end_date = datetime.date(2025, 12, 15)
 3. 训练和比较多个模型
 4. 运行完整回测
 
-后续运行会使用断点续跑机制，速度会快很多。
-
 ### Q2: 如何重新训练模型？
-**A:** 代码会自动删除旧的simulation文件。如果需要断点续跑，注释掉这几行：
-```python
-# if os.path.exists(simulation_file):
-#     print(f"删除旧的模拟文件: {simulation_file}")
-#     os.remove(simulation_file)
-```
+**A:** 每次运行都会重新训练模型，无需特殊操作。
 
 ### Q3: 信息比率是负数怎么办？
 **A:** 可能的原因和解决方法：

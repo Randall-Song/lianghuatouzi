@@ -33,10 +33,6 @@
 - **数据清洗**：去除ST股票、停牌股票和缺失数据
 - **标准化处理**：对因子进行标准化和异常值处理
 
-### 4. 断点续跑
-- **自动删除旧文件**：重新训练时自动删除simulation_file
-- **可选续跑**：可注释掉删除代码以支持断点续跑
-
 ## 📁 文件说明
 
 ### 核心文件
@@ -72,16 +68,6 @@ end_date = datetime.date(2025, 12, 15)  # 回测结束日期
 investment_horizon = 'M'  # 调仓频率：'M'月度，'W'周度，'d'日度
 number_of_periods_per_year = 12  # 对应调仓频率的年化周期数
 optimal_stock_count = 50  # 选择的股票数量
-```
-
-### 断点续跑
-
-如果需要断点续跑，注释掉以下代码：
-
-```python
-# if os.path.exists(simulation_file):
-#     print(f"删除旧的模拟文件: {simulation_file}")
-#     os.remove(simulation_file)
 ```
 
 ## 策略说明
