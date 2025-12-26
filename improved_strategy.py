@@ -14,7 +14,6 @@ from jqdata import (
     get_extras,
     get_index_stocks,
     get_price,
-    get_trade_days,
 )
 
 # -----------------------------
@@ -23,16 +22,16 @@ from jqdata import (
 start_date = datetime.date(2020, 1, 1)
 end_date = datetime.date(2025, 12, 15)
 investment_horizon = "M"  # 只允许 'M' 或 'W'
+TRAINING_YEARS = 3
 
 if investment_horizon not in ("M", "W"):
     raise ValueError("investment_horizon must be 'M' or 'W'")
 
-number_of_periods_per_year = 12 if investment_horizon == "M" else 52
-simulation_file = "L10_temp_fixed_m_basicsrisk.pkl"
+SIMULATION_FILE = "L10_temp_fixed_m_basicsrisk.pkl"
 
 # 重新设计模型时清理断点续跑文件，防止复用旧状态
-if os.path.exists(simulation_file):
-    os.remove(simulation_file)
+if os.path.exists(SIMULATION_FILE):
+    os.remove(SIMULATION_FILE)
 
 
 # -----------------------------
@@ -106,7 +105,6 @@ def get_next_trade_date(current_date):
 
 def get_buy_dates(start_date: str, end_date: str, freq: str) -> list:
     periodic_dates = [x.date() for x in pd.date_range(start_date, end_date, freq=freq)]
-    trading_dates = get_trade_days(start_date, end_date)
     return np.sort(
         np.unique([get_next_trade_date(d) for d in periodic_dates if (get_next_trade_date(d) <= end_date)])
     ).tolist()
@@ -167,7 +165,7 @@ if training_cutoff_date is None:
     raise ValueError("无法确定 start_date 之前的交易日，用于训练集划分。")
 
 training_dates = get_buy_dates(
-    start_date=start_date - datetime.timedelta(365 * 3),
+    start_date=start_date - datetime.timedelta(days=365 * TRAINING_YEARS),
     end_date=training_cutoff_date,
     freq=investment_horizon,
 )
@@ -185,7 +183,8 @@ for i in tqdm(range(len(training_dates) - 1)):
     factor_df = factor_df.apply(normalize_series)
     factor_df_list.append(factor_df)
 
-factor_df_list = pd.concat(factor_df_list).dropna()
+factor_df_list = pd.concat(factor_df_list)
+factor_df_list = factor_df_list.dropna(subset=["next_vwap_ret"]).fillna(0)
 
 my_model = Ridge()
 my_model.fit(factor_df_list.iloc[:, :-1], factor_df_list.iloc[:, -1])
