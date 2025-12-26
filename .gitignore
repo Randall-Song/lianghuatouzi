@@ -1,0 +1,40 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Simulation files (for strategy testing)
+*.pkl
+L10_temp_*.pkl
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files
+strategy_performance.png
+*.log
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+.eggs/
+*.egg-info/
+dist/
+build/
