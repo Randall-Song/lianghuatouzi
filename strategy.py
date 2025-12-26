@@ -32,7 +32,7 @@ from math import sqrt
 # ============================================================================
 start_date = datetime.date(2020, 1, 1)
 end_date = datetime.date(2025, 12, 15)
-investment_horizon = 'M'  # M 为月度调参， W为周度调仓, d为日度调仓
+investment_horizon = 'M'  # M 为月度调仓， W为周度调仓, d为日度调仓
 number_of_periods_per_year = 12  # 一年12个交易月，52个交易周，252个交易日
 simulation_file = "L10_temp_fixed_m_basicsrisk.pkl"
 model_file = "my_model.pkl"
