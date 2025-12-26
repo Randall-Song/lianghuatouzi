@@ -19,7 +19,6 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 from jqlib import alpha101
 import pickle
 import os
-from jqfactor import get_all_factors 
 from math import sqrt
 import matplotlib.pyplot as plt
 
@@ -176,7 +175,6 @@ print("训练模型...")
 
 # 尝试使用多个模型并选择最佳的
 from sklearn.linear_model import Ridge, Lasso, ElasticNet
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import cross_val_score
 
 # 准备训练数据
@@ -210,7 +208,6 @@ models = {
 best_score = -np.inf
 best_model_name = None
 best_model = None
-best_features = selected_features
 
 for name, model in models.items():
     try:
@@ -232,7 +229,7 @@ my_model = best_model
 my_model.fit(X_train_selected, y_train)
 
 # 保存选择的特征列表，以便预测时使用
-selected_feature_names = best_features
+selected_feature_names = selected_features
 
 # 输出模型系数
 if hasattr(my_model, 'coef_'):
