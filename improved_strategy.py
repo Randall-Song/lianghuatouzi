@@ -29,6 +29,8 @@ TRANSACTION_COST_RATE = 0.001  # per turnover cost assumption
 PORTFOLIO_SIZE = 50  # target number of holdings
 CLEAN_SIMULATION_FILE = True
 INDEX_CODE = "000852.XSHG"
+LOG_EPS = 1e-6
+FACTOR_CATEGORIES = ["risk", "basics"]
 _SORTED_TRADE_DATES = None
 _SELECTED_FACTORS = None
 
@@ -139,7 +141,7 @@ def normalize_series(series):
 
     if series.abs().max() > OUTLIER_ABS_THRESHOLD:
         # 对称取log，既压缩极端值又保留因子方向
-        series = np.sign(series) * np.log2(1.0 + series.abs())
+        series = np.sign(series) * np.log2(1.0 + series.abs() + LOG_EPS)
 
     if np.isnan(series.mean()) or np.isnan(series.std()) or (series.std() < 0.000001):
         series.iloc[:] = 0.0
@@ -164,7 +166,7 @@ def get_selected_factors():
     global _SELECTED_FACTORS
     if _SELECTED_FACTORS is None:
         factors = get_all_factors()
-        factor_mask = factors.loc[:, "category"].isin(["risk", "basics"])
+        factor_mask = factors.loc[:, "category"].isin(FACTOR_CATEGORIES)
         _SELECTED_FACTORS = factors.loc[factor_mask, "factor"].tolist()
     return _SELECTED_FACTORS
 
