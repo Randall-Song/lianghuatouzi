@@ -19,7 +19,8 @@ from jqdata import (
 # 参数配置
 # -----------------------------
 start_date = datetime.date(2020, 1, 1)
-END_DATE = min(datetime.date.today(), datetime.date(2025, 12, 15))
+END_DATE_CUTOFF = datetime.date(2025, 12, 15)
+END_DATE = min(datetime.date.today(), END_DATE_CUTOFF)
 investment_horizon = "M"  # 只允许 'M' 或 'W'
 TRAINING_YEARS = 3
 OUTLIER_ABS_THRESHOLD = 101
@@ -27,6 +28,7 @@ RARE_VALUE_THRESHOLD = 20
 TRANSACTION_COST_RATE = 0.001
 PORTFOLIO_SIZE = 50
 CLEAN_SIMULATION_FILE = True
+INDEX_CODE = "000852.XSHG"
 _SORTED_TRADE_DATES = None
 _SELECTED_FACTORS = None
 
@@ -79,10 +81,21 @@ def cal_vwap_ret_series(order_book_ids, buy_date, sell_date):
         fq="post",
         panel=False,
     )
-    vwap_prices = all_data.set_index(["time", "code"]).unstack().loc[:, "money"] / all_data.set_index(
-        ["time", "code"]
-    ).unstack().loc[:, "volume"]
+    stacked = all_data.set_index(["time", "code"]).unstack()
+    volume = stacked.loc[:, "volume"].replace(0, np.nan)
+    money = stacked.loc[:, "money"]
+    vwap_prices = (money / volume).replace([np.inf, -np.inf], np.nan).dropna(axis=1, how="any")
+    if vwap_prices.empty:
+        return pd.Series(dtype="float64")
+
+    base_prices = vwap_prices.iloc[0].replace(0, np.nan)
+    valid_cols = base_prices[base_prices.notna() & (base_prices != 0)].index
+    vwap_prices = vwap_prices.loc[:, valid_cols]
+    if vwap_prices.empty:
+        return pd.Series(dtype="float64")
+
     vwap_ret_series = vwap_prices.iloc[-1] / vwap_prices.iloc[0] - 1
+    vwap_ret_series = vwap_ret_series.replace([np.inf, -np.inf], np.nan).dropna()
     return vwap_ret_series
 
 
@@ -181,7 +194,7 @@ def train_model():
 
     training_cutoff_date = get_previous_trade_date(start_date)
     if training_cutoff_date is None:
-        raise ValueError("无法确定 start_date 之前的交易日，用于训练集划分。")
+        raise ValueError("Unable to determine a trading date before start_date for training data split.")
 
     training_dates = get_buy_dates(
         start_date=start_date - datetime.timedelta(days=365 * TRAINING_YEARS),
@@ -194,7 +207,7 @@ def train_model():
         buy_date = training_dates[i]
         sell_date = training_dates[i + 1]
         i_pre_date = get_previous_trade_date(buy_date)
-        all_stocks = get_index_stocks("000852.XSHG", date=i_pre_date)
+        all_stocks = get_index_stocks(INDEX_CODE, date=i_pre_date)
         all_stocks = list(set(all_stocks) - get_st_or_paused_stock_set(i_pre_date))
 
         factor_df = get_my_factors(i_pre_date, all_stocks)
@@ -202,11 +215,11 @@ def train_model():
         factor_df = factor_df.apply(normalize_series)
         factor_df_list.append(factor_df)
 
-    factor_df_list = pd.concat(factor_df_list)
-    factor_df_list = factor_df_list.dropna(subset=["next_vwap_ret"]).fillna(0)
+    combined_factor_df = pd.concat(factor_df_list)
+    combined_factor_df = combined_factor_df.dropna(subset=["next_vwap_ret"]).fillna(0)
 
     my_model = Ridge()
-    my_model.fit(factor_df_list.iloc[:, :-1], factor_df_list.iloc[:, -1])
+    my_model.fit(combined_factor_df.iloc[:, :-1], combined_factor_df.iloc[:, -1])
     return my_model
 
 
@@ -220,7 +233,7 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     model = train_model()
 
     # 基础股票池，去掉st和停牌股
-    all_stocks = get_index_stocks("000852.XSHG", date=decision_date)
+    all_stocks = get_index_stocks(INDEX_CODE, date=decision_date)
     all_stocks = list(set(all_stocks) - get_st_or_paused_stock_set(decision_date))
 
     # 抓取因子
