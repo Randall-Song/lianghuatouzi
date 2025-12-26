@@ -3,7 +3,6 @@ import os
 
 import numpy as np
 import pandas as pd
-from jqlib import alpha101  # noqa: F401  # kept for parity with original notebook
 from jqfactor import get_all_factors, get_factor_values
 from sklearn.linear_model import Ridge
 from tqdm import tqdm
@@ -20,9 +19,14 @@ from jqdata import (
 # 参数配置
 # -----------------------------
 start_date = datetime.date(2020, 1, 1)
-end_date = datetime.date(2025, 12, 15)
+END_DATE = datetime.date(2025, 12, 15)
 investment_horizon = "M"  # 只允许 'M' 或 'W'
 TRAINING_YEARS = 3
+OUTLIER_ABS_THRESHOLD = 101
+RARE_VALUE_THRESHOLD = 20
+TRANSACTION_COST_RATE = 0.001
+PORTFOLIO_SIZE = 50
+CLEAN_SIMULATION_FILE = True
 
 if investment_horizon not in ("M", "W"):
     raise ValueError("investment_horizon must be 'M' or 'W'")
@@ -30,7 +34,7 @@ if investment_horizon not in ("M", "W"):
 SIMULATION_FILE = "L10_temp_fixed_m_basicsrisk.pkl"
 
 # 重新设计模型时清理断点续跑文件，防止复用旧状态
-if os.path.exists(SIMULATION_FILE):
+if CLEAN_SIMULATION_FILE and os.path.exists(SIMULATION_FILE):
     os.remove(SIMULATION_FILE)
 
 
@@ -80,7 +84,7 @@ def cal_portfolio_vwap_ret(old_portfolio_weight_series, new_portfolio_weight_ser
     hpr = (new_portfolio_weight_series * vwap_ret_series).sum()
 
     old_new = pd.concat([old_portfolio_weight_series, new_portfolio_weight_series], axis=1).fillna(0)
-    cost = (old_new.iloc[:, 0] - old_new.iloc[:, 1]).abs().sum() * 0.001
+    cost = (old_new.iloc[:, 0] - old_new.iloc[:, 1]).abs().sum() * TRANSACTION_COST_RATE
 
     return hpr - cost
 
@@ -113,14 +117,14 @@ def get_buy_dates(start_date: str, end_date: str, freq: str) -> list:
 def normalize_series(series):
     series = series.copy().replace([np.inf, -np.inf], np.nan)
 
-    if series.abs().max() > 101:
+    if series.abs().max() > OUTLIER_ABS_THRESHOLD:
         series = np.sign(series) * np.log2(1.0 + series.abs())
 
     if np.isnan(series.mean()) or np.isnan(series.std()) or (series.std() < 0.000001):
         series.iloc[:] = 0.0
         return series
 
-    if len(series.unique()) <= 20:
+    if len(series.unique()) <= RARE_VALUE_THRESHOLD:
         series = (series - series.mean()) / series.std()
         return series.fillna(0)
 
@@ -210,7 +214,7 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     predicted_factor = pd.Series(my_model.predict(factor_df), index=factor_df.index)
 
     # 筛选
-    filtered_assets = predicted_factor.nlargest(50).index.tolist()
+    filtered_assets = predicted_factor.nlargest(PORTFOLIO_SIZE).index.tolist()
 
     # 配权
     portfolio_weight_series = pd.Series(1 / len(filtered_assets), index=filtered_assets)
@@ -247,5 +251,5 @@ def simulate_wealth_process(start_date, end_date):
 
 
 if __name__ == "__main__":
-    wealth_process, allocation_dict = simulate_wealth_process(start_date, end_date)
+    wealth_process, allocation_dict = simulate_wealth_process(start_date, END_DATE)
     print(wealth_process.dropna().tail())
