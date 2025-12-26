@@ -19,7 +19,7 @@ from jqdata import (
 # 参数配置
 # -----------------------------
 start_date = datetime.date(2020, 1, 1)
-END_DATE = datetime.date(2025, 12, 15)
+END_DATE = min(datetime.date.today(), datetime.date(2025, 12, 15))
 investment_horizon = "M"  # 只允许 'M' 或 'W'
 TRAINING_YEARS = 3
 OUTLIER_ABS_THRESHOLD = 101
@@ -27,6 +27,8 @@ RARE_VALUE_THRESHOLD = 20
 TRANSACTION_COST_RATE = 0.001
 PORTFOLIO_SIZE = 50
 CLEAN_SIMULATION_FILE = True
+_SORTED_TRADE_DATES = None
+_SELECTED_FACTORS = None
 
 if investment_horizon not in ("M", "W"):
     raise ValueError("investment_horizon must be 'M' or 'W'")
@@ -41,6 +43,13 @@ if CLEAN_SIMULATION_FILE and os.path.exists(SIMULATION_FILE):
 # -----------------------------
 # 辅助函数
 # -----------------------------
+def get_sorted_trade_days():
+    global _SORTED_TRADE_DATES
+    if _SORTED_TRADE_DATES is None:
+        _SORTED_TRADE_DATES = sorted(get_all_trade_days())
+    return _SORTED_TRADE_DATES
+
+
 def get_st_or_paused_stock_set(decision_date):
     all_stock_ids = get_all_securities(types=["stock"], date=decision_date).index.tolist()
     is_st_flag = get_extras("is_st", all_stock_ids, start_date=decision_date, end_date=decision_date)
@@ -90,8 +99,7 @@ def cal_portfolio_vwap_ret(old_portfolio_weight_series, new_portfolio_weight_ser
 
 
 def get_previous_trade_date(current_date):
-    trading_dates = get_all_trade_days()
-    trading_dates = sorted(trading_dates)
+    trading_dates = get_sorted_trade_days()
     for trading_date in reversed(trading_dates):
         if trading_date < current_date:
             return trading_date
@@ -99,15 +107,14 @@ def get_previous_trade_date(current_date):
 
 
 def get_next_trade_date(current_date):
-    trading_dates = get_all_trade_days()
-    trading_dates = sorted(trading_dates)
+    trading_dates = get_sorted_trade_days()
     for trading_date in trading_dates:
         if trading_date > current_date:
             return trading_date
     return None
 
 
-def get_buy_dates(start_date: str, end_date: str, freq: str) -> list:
+def get_buy_dates(start_date, end_date, freq: str) -> list:
     periodic_dates = [x.date() for x in pd.date_range(start_date, end_date, freq=freq)]
     return np.sort(
         np.unique([get_next_trade_date(d) for d in periodic_dates if (get_next_trade_date(d) <= end_date)])
@@ -139,15 +146,18 @@ def normalize_series(series):
     return series
 
 
-all_factors = get_all_factors()
-all_factors = all_factors.loc[
-    [a in ["risk", "basics"] for a in all_factors.loc[:, "category"]], "factor"
-].tolist()
+def get_selected_factors():
+    global _SELECTED_FACTORS
+    if _SELECTED_FACTORS is None:
+        factors = get_all_factors()
+        _SELECTED_FACTORS = factors.loc[[a in ["risk", "basics"] for a in factors.loc[:, "category"]], "factor"].tolist()
+    return _SELECTED_FACTORS
 
 
 def get_my_factors(decision_date, all_stocks):
     factor_df_list = []
-    for i_factor in all_factors:
+    selected_factors = get_selected_factors()
+    for i_factor in selected_factors:
         factor_df_list.append(
             get_factor_values(
                 securities=all_stocks,
@@ -157,41 +167,47 @@ def get_my_factors(decision_date, all_stocks):
             )[i_factor].T
         )
     factor_df = pd.concat(factor_df_list, axis=1)
-    factor_df.columns = all_factors
+    factor_df.columns = selected_factors
     return factor_df
 
 
-# -----------------------------
-# 训练模型（使用 start_date 之前的数据）
-# -----------------------------
-training_cutoff_date = get_previous_trade_date(start_date)
-if training_cutoff_date is None:
-    raise ValueError("无法确定 start_date 之前的交易日，用于训练集划分。")
+my_model = None
 
-training_dates = get_buy_dates(
-    start_date=start_date - datetime.timedelta(days=365 * TRAINING_YEARS),
-    end_date=training_cutoff_date,
-    freq=investment_horizon,
-)
 
-factor_df_list = []
-for i in tqdm(range(len(training_dates) - 1)):
-    buy_date = training_dates[i]
-    sell_date = training_dates[i + 1]
-    i_pre_date = get_previous_trade_date(buy_date)
-    all_stocks = get_index_stocks("000852.XSHG", date=i_pre_date)
-    all_stocks = list(set(all_stocks) - get_st_or_paused_stock_set(i_pre_date))
+def train_model():
+    global my_model
+    if my_model is not None:
+        return my_model
 
-    factor_df = get_my_factors(i_pre_date, all_stocks)
-    factor_df.loc[:, "next_vwap_ret"] = cal_vwap_ret_series(all_stocks, buy_date, sell_date)
-    factor_df = factor_df.apply(normalize_series)
-    factor_df_list.append(factor_df)
+    training_cutoff_date = get_previous_trade_date(start_date)
+    if training_cutoff_date is None:
+        raise ValueError("无法确定 start_date 之前的交易日，用于训练集划分。")
 
-factor_df_list = pd.concat(factor_df_list)
-factor_df_list = factor_df_list.dropna(subset=["next_vwap_ret"]).fillna(0)
+    training_dates = get_buy_dates(
+        start_date=start_date - datetime.timedelta(days=365 * TRAINING_YEARS),
+        end_date=training_cutoff_date,
+        freq=investment_horizon,
+    )
 
-my_model = Ridge()
-my_model.fit(factor_df_list.iloc[:, :-1], factor_df_list.iloc[:, -1])
+    factor_df_list = []
+    for i in tqdm(range(len(training_dates) - 1)):
+        buy_date = training_dates[i]
+        sell_date = training_dates[i + 1]
+        i_pre_date = get_previous_trade_date(buy_date)
+        all_stocks = get_index_stocks("000852.XSHG", date=i_pre_date)
+        all_stocks = list(set(all_stocks) - get_st_or_paused_stock_set(i_pre_date))
+
+        factor_df = get_my_factors(i_pre_date, all_stocks)
+        factor_df.loc[:, "next_vwap_ret"] = cal_vwap_ret_series(all_stocks, buy_date, sell_date)
+        factor_df = factor_df.apply(normalize_series)
+        factor_df_list.append(factor_df)
+
+    factor_df_list = pd.concat(factor_df_list)
+    factor_df_list = factor_df_list.dropna(subset=["next_vwap_ret"]).fillna(0)
+
+    my_model = Ridge()
+    my_model.fit(factor_df_list.iloc[:, :-1], factor_df_list.iloc[:, -1])
+    return my_model
 
 
 # -----------------------------
@@ -201,6 +217,7 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     # 在decision_date收盘后决定接下来下一天要买的投资组合
     # 这个函数里面不能使用任何decision_date所在时间之后的信息
     #（decision_date当天收盘的信息依然可用，假设在decision_date的下一天才调仓）
+    model = train_model()
 
     # 基础股票池，去掉st和停牌股
     all_stocks = get_index_stocks("000852.XSHG", date=decision_date)
@@ -211,7 +228,7 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     factor_df = factor_df.apply(normalize_series)
 
     # 预测
-    predicted_factor = pd.Series(my_model.predict(factor_df), index=factor_df.index)
+    predicted_factor = pd.Series(model.predict(factor_df), index=factor_df.index)
 
     # 筛选
     filtered_assets = predicted_factor.nlargest(PORTFOLIO_SIZE).index.tolist()
