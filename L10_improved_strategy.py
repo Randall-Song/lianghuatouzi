@@ -1,18 +1,19 @@
-# L10 多因子策略 - 改进版（基于超额收益优化）
-# 目标：设计信息比率尽量高的策略
+# L10 多因子策略 - 高信息比率优化版
+# 目标：设计信息比率达到0.5以上的策略
 #
-# 关键改进：
-# 1. 目标变量改为预测超额收益（相对标准ETF基准）而非绝对收益
-# 2. 更激进的特征选择（前30%相关性因子）
-# 3. 添加因子交互项以捕捉非线性关系
-# 4. 更精细的模型超参数调优
-# 5. 集中持仓（40只股票）以获得更高的超额收益
+# 关键改进（针对信息比率>0.5）：
+# 1. 扩展因子池：使用5个类别（risk, basics, quality, growth, momentum）
+# 2. 极度集中持仓：仅选择30只股票（vs 原40只）
+# 3. 超激进特征选择：只选择相关性前20%的因子（vs 原30%）
+# 4. 增强非线性建模：添加Top-5因子交互项 + Top-3因子平方项
+# 5. 更精细的正则化：alpha范围0.0001-0.001（vs 原0.0005-0.005）
+# 6. 超额收益优化：直接预测相对基准ETF的超额收益
 #
 # 重要说明：
 # 1. 训练my_model的数据必须是start_date之前的数据
 # 2. cal_portfolio_weight_series(decision_date)函数签名不能改动
 # 3. 要求在聚宽环境中运行，不改变原本的输出格式
-# 4. 信息比率应为正且尽可能大
+# 4. 信息比率目标>0.5
 
 import pandas as pd
 import numpy as np
@@ -32,12 +33,14 @@ start_date = datetime.date(2020, 1, 1)
 end_date = datetime.date(2025, 12, 15)
 investment_horizon = 'M'  # M 为月度调仓， W为周度调仓, d为日度调仓
 number_of_periods_per_year = 12  # 一年12个交易月，52个交易周，252个交易日
-optimal_stock_count = 40  # 选择的股票数量（减少以提高集中度和超额收益）
+optimal_stock_count = 30  # 选择的股票数量（进一步集中以提高信息比率）
 
 # ========== 因子获取 ==========
+# 使用更多因子类别以提高预测能力
 all_factors = get_all_factors()
-all_factors = all_factors.loc[[a in ['risk', 'basics'] 
+all_factors = all_factors.loc[[a in ['risk', 'basics', 'quality', 'growth', 'momentum'] 
                  for a in all_factors.loc[:, 'category']], 'factor'].tolist()
+print(f"使用 {len(all_factors)} 个因子进行建模")
 
 # ========== 辅助函数 ==========
 def get_st_or_paused_stock_set(decision_date):
@@ -205,43 +208,52 @@ y_train = factor_df_list.iloc[:, -1]
 
 # 特征选择：计算每个因子与超额收益的相关性
 correlations = X_train.corrwith(y_train).abs()
-print(f"\n因子与超额收益相关性分析（前10个）:")
-print(correlations.nlargest(10))
+print(f"\n因子与超额收益相关性分析（前15个）:")
+print(correlations.nlargest(15))
 
-# 使用更激进的特征选择策略 - 只选择相关性前30%的因子
-threshold = correlations.quantile(0.7)  # 选择相关性前30%的因子
+# 极度激进的特征选择策略 - 只选择相关性前20%的因子
+threshold = correlations.quantile(0.8)  # 选择相关性前20%的因子
 selected_features = correlations[correlations > threshold].index.tolist()
 print(f"\n选择了 {len(selected_features)} 个因子（相关性 > {threshold:.4f}）")
 
-# 如果选择的特征太少，至少保留前10个
-if len(selected_features) < 10:
-    selected_features = correlations.nlargest(10).index.tolist()
-    print(f"特征数量不足，使用前10个相关性最高的因子")
+# 如果选择的特征太少，至少保留前8个
+if len(selected_features) < 8:
+    selected_features = correlations.nlargest(8).index.tolist()
+    print(f"特征数量不足，使用前8个相关性最高的因子")
 
 X_train_selected = X_train[selected_features]
 
-# 添加因子交互项以捕捉非线性关系
-print("\n添加因子交互项...")
+# 添加更多因子交互项和非线性变换
+print("\n添加因子交互项和非线性变换...")
 if len(selected_features) >= 2:
-    # 选择相关性最高的3个因子进行交互
-    top_features = correlations.nlargest(min(3, len(selected_features))).index.tolist()
+    # 选择相关性最高的5个因子进行交互（增加非线性能力）
+    top_features = correlations.nlargest(min(5, len(selected_features))).index.tolist()
+    
+    # 二阶交互项
     for i in range(len(top_features)):
         for j in range(i+1, len(top_features)):
             interaction_name = f"{top_features[i]}_x_{top_features[j]}"
             X_train_selected[interaction_name] = X_train[top_features[i]] * X_train[top_features[j]]
+    
+    # 平方项（捕捉非线性）
+    for feature in top_features[:3]:  # 前3个因子的平方项
+        square_name = f"{feature}_squared"
+        X_train_selected[square_name] = X_train[feature] ** 2
 
 print(f"增强后的特征数量: {X_train_selected.shape[1]}")
 
-# 尝试多个模型，包括集成方法
+# 尝试更多模型，使用更激进的超参数以提高拟合能力
 models = {
+    'Ridge_alpha0.05': Ridge(alpha=0.05),
     'Ridge_alpha0.1': Ridge(alpha=0.1),
-    'Ridge_alpha0.5': Ridge(alpha=0.5),
-    'Ridge_alpha1.0': Ridge(alpha=1.0),
+    'Ridge_alpha0.3': Ridge(alpha=0.3),
+    'Lasso_alpha0.0001': Lasso(alpha=0.0001, max_iter=10000),
     'Lasso_alpha0.0005': Lasso(alpha=0.0005, max_iter=10000),
     'Lasso_alpha0.001': Lasso(alpha=0.001, max_iter=10000),
+    'ElasticNet_0.3_0.0005': ElasticNet(alpha=0.0005, l1_ratio=0.3, max_iter=10000),
+    'ElasticNet_0.5_0.0005': ElasticNet(alpha=0.0005, l1_ratio=0.5, max_iter=10000),
     'ElasticNet_0.5_0.001': ElasticNet(alpha=0.001, l1_ratio=0.5, max_iter=10000),
     'ElasticNet_0.7_0.001': ElasticNet(alpha=0.001, l1_ratio=0.7, max_iter=10000),
-    'ElasticNet_0.5_0.005': ElasticNet(alpha=0.005, l1_ratio=0.5, max_iter=10000),
 }
 
 best_score = -np.inf
@@ -274,10 +286,10 @@ selected_feature_names = best_features
 # 输出模型系数和重要性
 if hasattr(my_model, 'coef_'):
     coefficients = my_model.coef_
-    print("\n回归权重（系数）- 前10个最重要的因子:")
+    print("\n回归权重（系数）- 前15个最重要的因子:")
     coef_series = pd.Series(coefficients, index=selected_feature_names)
-    # 显示绝对值最大的前10个系数
-    print(coef_series.abs().nlargest(min(10, len(coef_series))))
+    # 显示绝对值最大的前15个系数
+    print(coef_series.abs().nlargest(min(15, len(coef_series))))
 
 # ========== 定义组合权重计算函数（不能修改） ==========
 def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
@@ -293,16 +305,21 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     factor_df = get_my_factors(decision_date, all_stocks)
     factor_df = factor_df.apply(normalize_series)
     
-    # 构建包含交互项的特征矩阵
+    # 构建包含交互项和非线性项的特征矩阵
     factor_df_with_interactions = factor_df.copy()
     
-    # 添加训练时使用的交互项
+    # 添加训练时使用的交互项和平方项
     for feature_name in selected_feature_names:
         if '_x_' in feature_name:
             # 这是一个交互项
             parts = feature_name.split('_x_')
             if len(parts) == 2 and parts[0] in factor_df.columns and parts[1] in factor_df.columns:
                 factor_df_with_interactions[feature_name] = factor_df[parts[0]] * factor_df[parts[1]]
+        elif '_squared' in feature_name:
+            # 这是一个平方项
+            base_feature = feature_name.replace('_squared', '')
+            if base_feature in factor_df.columns:
+                factor_df_with_interactions[feature_name] = factor_df[base_feature] ** 2
     
     # 选择训练时使用的特征
     available_features = [f for f in selected_feature_names if f in factor_df_with_interactions.columns]
