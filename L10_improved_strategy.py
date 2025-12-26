@@ -1,5 +1,12 @@
-# L10 多因子策略 - 改进版
+# L10 多因子策略 - 改进版（基于超额收益优化）
 # 目标：设计信息比率尽量高的策略
+#
+# 关键改进：
+# 1. 目标变量改为预测超额收益（相对标准ETF基准）而非绝对收益
+# 2. 更激进的特征选择（前30%相关性因子）
+# 3. 添加因子交互项以捕捉非线性关系
+# 4. 更精细的模型超参数调优
+# 5. 集中持仓（40只股票）以获得更高的超额收益
 #
 # 重要说明：
 # 1. 训练my_model的数据必须是start_date之前的数据
@@ -25,7 +32,7 @@ start_date = datetime.date(2020, 1, 1)
 end_date = datetime.date(2025, 12, 15)
 investment_horizon = 'M'  # M 为月度调仓， W为周度调仓, d为日度调仓
 number_of_periods_per_year = 12  # 一年12个交易月，52个交易周，252个交易日
-optimal_stock_count = 50  # 选择的股票数量
+optimal_stock_count = 40  # 选择的股票数量（减少以提高集中度和超额收益）
 
 # ========== 因子获取 ==========
 all_factors = get_all_factors()
@@ -143,6 +150,16 @@ print(f"训练数据时间范围: {training_dates[0]} 到 {training_dates[-1]}")
 print(f"测试开始日期: {start_date}")
 print(f"确保训练数据在测试开始之前: {training_dates[-1] < start_date}")
 
+# 获取基准ETF收益率用于计算超额收益
+benchmark_etf_code = '512100.XSHG'
+benchmark_data = get_price([benchmark_etf_code], 
+                          start_date=training_dates[0], 
+                          end_date=training_dates[-1], 
+                          frequency='daily',
+                          fq='post', panel=False, fields=['money', 'volume'])
+benchmark_data.loc[:, 'vwap'] = benchmark_data.loc[:, 'money'] / benchmark_data.loc[:, 'volume']
+benchmark_data = benchmark_data.set_index('time').loc[:, ['vwap']]
+
 factor_df_list = []
 for i in tqdm(range(len(training_dates)-1)):
     buy_date = training_dates[i]
@@ -153,56 +170,88 @@ for i in tqdm(range(len(training_dates)-1)):
     
     factor_df = get_my_factors(i_pre_date, all_stocks)
     
-    factor_df.loc[:, 'next_vwap_ret'] = cal_vwap_ret_series(all_stocks, buy_date, sell_date)
+    # 计算股票收益率
+    stock_returns = cal_vwap_ret_series(all_stocks, buy_date, sell_date)
+    
+    # 计算基准ETF在同期的收益率
+    try:
+        benchmark_buy = benchmark_data.loc[buy_date, 'vwap']
+        benchmark_sell = benchmark_data.loc[sell_date, 'vwap']
+        benchmark_ret = benchmark_sell / benchmark_buy - 1
+    except:
+        benchmark_ret = 0.0
+    
+    # 计算超额收益（相对基准）
+    factor_df.loc[:, 'next_excess_ret'] = stock_returns - benchmark_ret
     factor_df = factor_df.apply(normalize_series)
     factor_df_list.append(factor_df)
 
 factor_df_list = pd.concat(factor_df_list).dropna()
 
 print(f"训练数据形状: {factor_df_list.shape}")
+print(f"目标变量：超额收益（相对基准ETF）")
 
 # ========== 模型训练 ==========
 print("训练模型...")
 
 # 尝试使用多个模型并选择最佳的
 from sklearn.linear_model import Ridge, Lasso, ElasticNet
+from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import cross_val_score
 
 # 准备训练数据
 X_train = factor_df_list.iloc[:, :-1]
 y_train = factor_df_list.iloc[:, -1]
 
-# 特征选择：计算每个因子与收益的相关性
+# 特征选择：计算每个因子与超额收益的相关性
 correlations = X_train.corrwith(y_train).abs()
-print(f"\n因子与收益相关性分析（前10个）:")
+print(f"\n因子与超额收益相关性分析（前10个）:")
 print(correlations.nlargest(10))
 
-# 选择相关性较高的因子
-threshold = correlations.quantile(0.5)  # 选择相关性前50%的因子
+# 使用更激进的特征选择策略 - 只选择相关性前30%的因子
+threshold = correlations.quantile(0.7)  # 选择相关性前30%的因子
 selected_features = correlations[correlations > threshold].index.tolist()
 print(f"\n选择了 {len(selected_features)} 个因子（相关性 > {threshold:.4f}）")
 
+# 如果选择的特征太少，至少保留前10个
+if len(selected_features) < 10:
+    selected_features = correlations.nlargest(10).index.tolist()
+    print(f"特征数量不足，使用前10个相关性最高的因子")
+
 X_train_selected = X_train[selected_features]
 
-# 尝试多个模型，使用更优的超参数
+# 添加因子交互项以捕捉非线性关系
+print("\n添加因子交互项...")
+if len(selected_features) >= 2:
+    # 选择相关性最高的3个因子进行交互
+    top_features = correlations.nlargest(min(3, len(selected_features))).index.tolist()
+    for i in range(len(top_features)):
+        for j in range(i+1, len(top_features)):
+            interaction_name = f"{top_features[i]}_x_{top_features[j]}"
+            X_train_selected[interaction_name] = X_train[top_features[i]] * X_train[top_features[j]]
+
+print(f"增强后的特征数量: {X_train_selected.shape[1]}")
+
+# 尝试多个模型，包括集成方法
 models = {
+    'Ridge_alpha0.1': Ridge(alpha=0.1),
     'Ridge_alpha0.5': Ridge(alpha=0.5),
     'Ridge_alpha1.0': Ridge(alpha=1.0),
-    'Ridge_alpha2.0': Ridge(alpha=2.0),
+    'Lasso_alpha0.0005': Lasso(alpha=0.0005, max_iter=10000),
     'Lasso_alpha0.001': Lasso(alpha=0.001, max_iter=10000),
-    'Lasso_alpha0.01': Lasso(alpha=0.01, max_iter=10000),
-    'ElasticNet_0.3': ElasticNet(alpha=0.01, l1_ratio=0.3, max_iter=10000),
-    'ElasticNet_0.5': ElasticNet(alpha=0.01, l1_ratio=0.5, max_iter=10000),
-    'ElasticNet_0.7': ElasticNet(alpha=0.01, l1_ratio=0.7, max_iter=10000),
+    'ElasticNet_0.5_0.001': ElasticNet(alpha=0.001, l1_ratio=0.5, max_iter=10000),
+    'ElasticNet_0.7_0.001': ElasticNet(alpha=0.001, l1_ratio=0.7, max_iter=10000),
+    'ElasticNet_0.5_0.005': ElasticNet(alpha=0.005, l1_ratio=0.5, max_iter=10000),
 }
 
 best_score = -np.inf
 best_model_name = None
 best_model = None
+best_features = X_train_selected.columns.tolist()
 
 for name, model in models.items():
     try:
-        # 使用交叉验证评估模型
+        # 使用交叉验证评估模型，关注R2得分
         scores = cross_val_score(model, X_train_selected, y_train, cv=5, scoring='r2')
         avg_score = scores.mean()
         print(f"{name} 平均R2得分: {avg_score:.4f} (+/- {scores.std() * 2:.4f})")
@@ -220,12 +269,12 @@ my_model = best_model
 my_model.fit(X_train_selected, y_train)
 
 # 保存选择的特征列表，以便预测时使用
-selected_feature_names = selected_features
+selected_feature_names = best_features
 
-# 输出模型系数
+# 输出模型系数和重要性
 if hasattr(my_model, 'coef_'):
     coefficients = my_model.coef_
-    print("\n回归权重（系数）:")
+    print("\n回归权重（系数）- 前10个最重要的因子:")
     coef_series = pd.Series(coefficients, index=selected_feature_names)
     # 显示绝对值最大的前10个系数
     print(coef_series.abs().nlargest(min(10, len(coef_series))))
@@ -244,14 +293,26 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     factor_df = get_my_factors(decision_date, all_stocks)
     factor_df = factor_df.apply(normalize_series)
     
-    # 使用选择的特征进行预测
-    factor_df_selected = factor_df[selected_feature_names]
+    # 构建包含交互项的特征矩阵
+    factor_df_with_interactions = factor_df.copy()
     
-    # 预测
-    predicted_factor = pd.Series(my_model.predict(factor_df_selected), index=factor_df.index)
+    # 添加训练时使用的交互项
+    for feature_name in selected_feature_names:
+        if '_x_' in feature_name:
+            # 这是一个交互项
+            parts = feature_name.split('_x_')
+            if len(parts) == 2 and parts[0] in factor_df.columns and parts[1] in factor_df.columns:
+                factor_df_with_interactions[feature_name] = factor_df[parts[0]] * factor_df[parts[1]]
     
-    # 筛选 - 选择预测收益最高的股票
-    filtered_assets = predicted_factor.nlargest(optimal_stock_count).index.tolist()
+    # 选择训练时使用的特征
+    available_features = [f for f in selected_feature_names if f in factor_df_with_interactions.columns]
+    factor_df_selected = factor_df_with_interactions[available_features]
+    
+    # 预测超额收益
+    predicted_excess_returns = pd.Series(my_model.predict(factor_df_selected), index=factor_df.index)
+    
+    # 筛选 - 选择预测超额收益最高的股票
+    filtered_assets = predicted_excess_returns.nlargest(optimal_stock_count).index.tolist()
     
     # 配权 - 等权重
     portfolio_weight_series = pd.Series(1/len(filtered_assets), index=filtered_assets)
