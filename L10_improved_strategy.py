@@ -1,19 +1,19 @@
-# L10 多因子策略 - 稳健正信息比率版
-# 目标：设计信息比率为正的稳健策略
+# L10 多因子策略 - 优化正信息比率版
+# 目标：在稳健性基础上进一步提升信息比率
 #
-# 核心策略调整：
-# 1. 简化因子池：只使用最可靠的basics和quality因子
+# 核心策略调整（基于IR=0.09的稳健基线）：
+# 1. 扩展因子池：添加value因子（basics, quality, value三类最可靠因子）
 # 2. 平衡持仓：选择40只股票以平衡风险和收益
-# 3. 温和特征选择：选择相关性前40%的因子（避免过拟合）
-# 4. 简单线性模型：不使用复杂交互项，避免过度拟合
-# 5. 适度正则化：使用中等alpha值，平衡偏差和方差
-# 6. 绝对收益预测：回归预测绝对收益率（更稳定）
+# 3. 略微激进的特征选择：选择相关性前35%的因子（在稳健性和信号强度间平衡）
+# 4. 最小非线性：仅添加Top-2因子交互项（谨慎捕捉非线性关系）
+# 5. 略微降低正则化：使用0.3-1.5的alpha值（在偏差方差间更好平衡）
+# 6. 绝对收益预测：回归预测绝对收益率（保持稳定）
 #
 # 重要说明：
 # 1. 训练my_model的数据必须是start_date之前的数据
 # 2. cal_portfolio_weight_series(decision_date)函数签名不能改动
 # 3. 要求在聚宽环境中运行，不改变原本的输出格式
-# 4. 信息比率必须为正
+# 4. 信息比率必须为正且持续提升
 
 import pandas as pd
 import numpy as np
@@ -36,9 +36,9 @@ number_of_periods_per_year = 12  # 一年12个交易月，52个交易周，252�
 optimal_stock_count = 40  # 选择的股票数量（平衡风险和收益）
 
 # ========== 因子获取 ==========
-# 使用最可靠的basics和quality因子
+# 使用三类最可靠的基本面因子：basics, quality, value
 all_factors = get_all_factors()
-all_factors = all_factors.loc[[a in ['basics', 'quality'] 
+all_factors = all_factors.loc[[a in ['basics', 'quality', 'value'] 
                  for a in all_factors.loc[:, 'category']], 'factor'].tolist()
 print(f"使用 {len(all_factors)} 个因子进行建模")
 
@@ -186,11 +186,11 @@ y_train = factor_df_list.iloc[:, -1]
 
 # 特征选择：计算每个因子与收益的相关性
 correlations = X_train.corrwith(y_train).abs()
-print(f"\n因子与收益相关性分析（前10个）:")
-print(correlations.nlargest(10))
+print(f"\n因子与收益相关性分析（前12个）:")
+print(correlations.nlargest(12))
 
-# 温和的特征选择策略 - 选择相关性前40%的因子（平衡信号和噪声）
-threshold = correlations.quantile(0.6)  # 选择相关性前40%的因子
+# 略微激进的特征选择策略 - 选择相关性前35%的因子（提高信号质量）
+threshold = correlations.quantile(0.65)  # 选择相关性前35%的因子
 selected_features = correlations[correlations > threshold].index.tolist()
 print(f"\n选择了 {len(selected_features)} 个因子（相关性 > {threshold:.4f}）")
 
@@ -201,18 +201,31 @@ if len(selected_features) < 10:
 
 X_train_selected = X_train[selected_features]
 
-print(f"特征数量: {X_train_selected.shape[1]}")
+# 添加最小非线性：仅Top-2因子交互（谨慎增强）
+print("\n添加最小非线性特征...")
+if len(selected_features) >= 2:
+    # 仅选择相关性最高的2个因子进行交互
+    top_features = correlations.nlargest(min(2, len(selected_features))).index.tolist()
+    for i in range(len(top_features)):
+        for j in range(i+1, len(top_features)):
+            interaction_name = f"{top_features[i]}_x_{top_features[j]}"
+            X_train_selected[interaction_name] = X_train[top_features[i]] * X_train[top_features[j]]
+    print(f"添加了 {len(top_features)*(len(top_features)-1)//2} 个交互项")
 
-# 使用稳健的模型配置，适度正则化
+print(f"增强后的特征数量: {X_train_selected.shape[1]}")
+
+# 使用略微降低的正则化，提升拟合能力
 models = {
+    'Ridge_alpha0.3': Ridge(alpha=0.3),
     'Ridge_alpha0.5': Ridge(alpha=0.5),
     'Ridge_alpha1.0': Ridge(alpha=1.0),
-    'Ridge_alpha2.0': Ridge(alpha=2.0),
+    'Ridge_alpha1.5': Ridge(alpha=1.5),
+    'Lasso_alpha0.0005': Lasso(alpha=0.0005, max_iter=10000),
     'Lasso_alpha0.001': Lasso(alpha=0.001, max_iter=10000),
-    'Lasso_alpha0.005': Lasso(alpha=0.005, max_iter=10000),
-    'ElasticNet_0.5_0.005': ElasticNet(alpha=0.005, l1_ratio=0.5, max_iter=10000),
-    'ElasticNet_0.5_0.01': ElasticNet(alpha=0.01, l1_ratio=0.5, max_iter=10000),
-    'ElasticNet_0.7_0.01': ElasticNet(alpha=0.01, l1_ratio=0.7, max_iter=10000),
+    'Lasso_alpha0.003': Lasso(alpha=0.003, max_iter=10000),
+    'ElasticNet_0.5_0.001': ElasticNet(alpha=0.001, l1_ratio=0.5, max_iter=10000),
+    'ElasticNet_0.5_0.003': ElasticNet(alpha=0.003, l1_ratio=0.5, max_iter=10000),
+    'ElasticNet_0.7_0.003': ElasticNet(alpha=0.003, l1_ratio=0.7, max_iter=10000),
 }
 
 best_score = -np.inf
@@ -240,15 +253,15 @@ my_model = best_model
 my_model.fit(X_train_selected, y_train)
 
 # 保存选择的特征列表，以便预测时使用
-selected_feature_names = best_features
+selected_feature_names = X_train_selected.columns.tolist()
 
 # 输出模型系数和重要性
 if hasattr(my_model, 'coef_'):
     coefficients = my_model.coef_
-    print("\n回归权重（系数）- 前10个最重要的因子:")
+    print("\n回归权重（系数）- 前12个最重要的因子:")
     coef_series = pd.Series(coefficients, index=selected_feature_names)
-    # 显示绝对值最大的前10个系数
-    print(coef_series.abs().nlargest(min(10, len(coef_series))))
+    # 显示绝对值最大的前12个系数
+    print(coef_series.abs().nlargest(min(12, len(coef_series))))
 
 # ========== 定义组合权重计算函数（不能修改） ==========
 def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
@@ -264,8 +277,20 @@ def cal_portfolio_weight_series(decision_date, old_portfolio_weight_series):
     factor_df = get_my_factors(decision_date, all_stocks)
     factor_df = factor_df.apply(normalize_series)
     
-    # 使用选择的特征进行预测（简单线性模型）
-    factor_df_selected = factor_df[selected_feature_names]
+    # 构建包含交互项的特征矩阵
+    factor_df_with_features = factor_df.copy()
+    
+    # 添加训练时使用的交互项
+    for feature_name in selected_feature_names:
+        if '_x_' in feature_name:
+            # 这是一个交互项
+            parts = feature_name.split('_x_')
+            if len(parts) == 2 and parts[0] in factor_df.columns and parts[1] in factor_df.columns:
+                factor_df_with_features[feature_name] = factor_df[parts[0]] * factor_df[parts[1]]
+    
+    # 选择训练时使用的特征
+    available_features = [f for f in selected_feature_names if f in factor_df_with_features.columns]
+    factor_df_selected = factor_df_with_features[available_features]
     
     # 预测收益
     predicted_returns = pd.Series(my_model.predict(factor_df_selected), index=factor_df.index)
