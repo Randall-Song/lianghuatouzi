@@ -1,6 +1,15 @@
 # L10 多因子策略 - 改进版
 
-## 项目概述
+> 基于机器学习的多因子量化投资策略，目标是最大化信息比率
+
+## 📚 文档导航
+
+- **[快速开始 →](QUICK_START.md)** - 5分钟上手指南
+- **[聚宽平台指南 →](JOINQUANT_GUIDE.md)** - 详细使用说明和常见问题
+- **[改进对比 →](COMPARISON.md)** - 查看改进前后的详细对比
+- **[实施总结 →](IMPLEMENTATION_SUMMARY.md)** - 技术实现细节和质量保证
+
+## 📊 项目概述
 
 本项目实现了一个基于多因子模型的量化投资策略，目标是设计一个信息比率尽可能高的策略。
 
@@ -28,13 +37,22 @@
 - **自动删除旧文件**：重新训练时自动删除simulation_file
 - **可选续跑**：可注释掉删除代码以支持断点续跑
 
-## 文件说明
+## 📁 文件说明
 
-- `L10_improved_strategy.py` - Python脚本版本
-- `L10_improved_strategy.ipynb` - Jupyter Notebook版本（推荐在聚宽平台使用）
+### 核心文件
+- **`L10_improved_strategy.py`** - Python脚本版本，可直接运行
+- **`L10_improved_strategy.ipynb`** - Jupyter Notebook版本（**推荐在聚宽平台使用**）
+
+### 文档文件
+- **`QUICK_START.md`** - 5分钟快速上手指南 ⭐
+- **`JOINQUANT_GUIDE.md`** - 聚宽平台详细使用指南
+- **`COMPARISON.md`** - 原版vs改进版详细对比
+- **`IMPLEMENTATION_SUMMARY.md`** - 技术实现总结
+
+### 原始文件
 - `L10_多因子策略_比赛.html` - 原始策略HTML文档
 
-## 使用方法
+## 🚀 使用方法
 
 ### 在聚宽平台运行
 
@@ -42,7 +60,9 @@
 2. 按顺序运行所有单元格
 3. 查看输出的性能指标和图表
 
-### 配置参数
+> 💡 **提示**：详细的使用说明请参考 [JOINQUANT_GUIDE.md](JOINQUANT_GUIDE.md)
+
+### ⚙️ 配置参数
 
 可以修改以下参数来调整策略：
 
