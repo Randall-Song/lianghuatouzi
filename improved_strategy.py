@@ -23,10 +23,10 @@ END_DATE_CUTOFF = datetime.date(2025, 12, 15)
 END_DATE = min(datetime.date.today(), END_DATE_CUTOFF)
 investment_horizon = "M"  # 只允许 'M' 或 'W'
 TRAINING_YEARS = 3
-OUTLIER_ABS_THRESHOLD = 101
-RARE_VALUE_THRESHOLD = 20
-TRANSACTION_COST_RATE = 0.001
-PORTFOLIO_SIZE = 50
+OUTLIER_ABS_THRESHOLD = 101  # clamp extremely large absolute factor values before scaling
+RARE_VALUE_THRESHOLD = 20  # treat low-cardinality factors as categorical-like for normalization
+TRANSACTION_COST_RATE = 0.001  # per turnover cost assumption
+PORTFOLIO_SIZE = 50  # target number of holdings
 CLEAN_SIMULATION_FILE = True
 INDEX_CODE = "000852.XSHG"
 _SORTED_TRADE_DATES = None
@@ -138,6 +138,7 @@ def normalize_series(series):
     series = series.copy().replace([np.inf, -np.inf], np.nan)
 
     if series.abs().max() > OUTLIER_ABS_THRESHOLD:
+        # 对称取log，既压缩极端值又保留因子方向
         series = np.sign(series) * np.log2(1.0 + series.abs())
 
     if np.isnan(series.mean()) or np.isnan(series.std()) or (series.std() < 0.000001):
@@ -163,7 +164,8 @@ def get_selected_factors():
     global _SELECTED_FACTORS
     if _SELECTED_FACTORS is None:
         factors = get_all_factors()
-        _SELECTED_FACTORS = factors.loc[[a in ["risk", "basics"] for a in factors.loc[:, "category"]], "factor"].tolist()
+        factor_mask = factors.loc[:, "category"].isin(["risk", "basics"])
+        _SELECTED_FACTORS = factors.loc[factor_mask, "factor"].tolist()
     return _SELECTED_FACTORS
 
 
@@ -194,7 +196,7 @@ def train_model():
 
     training_cutoff_date = get_previous_trade_date(start_date)
     if training_cutoff_date is None:
-        raise ValueError("Unable to determine a trading date before start_date for training data split.")
+        raise ValueError(f"Unable to determine a trading date before start_date {start_date} for training data split.")
 
     training_dates = get_buy_dates(
         start_date=start_date - datetime.timedelta(days=365 * TRAINING_YEARS),
@@ -269,7 +271,7 @@ def simulate_wealth_process(start_date, end_date):
         decision_date = get_previous_trade_date(buy_date)  # 前一天晚上做决策，在buy_date用vwap价格买卖
         new_portfolio_weight_series = cal_portfolio_weight_series(decision_date, old_portfolio_weight_series)
 
-        allocation_dict[buy_date] = new_portfolio_weight_series.copy()  # 这里的copy巨重要
+        allocation_dict[buy_date] = new_portfolio_weight_series.copy()  # copy to prevent later mutations from altering history
 
         wealth_process.loc[sell_date] = wealth_process.loc[buy_date] * (
             1 + cal_portfolio_vwap_ret(old_portfolio_weight_series, new_portfolio_weight_series, buy_date, sell_date)
